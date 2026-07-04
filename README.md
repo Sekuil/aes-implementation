@@ -1,5 +1,5 @@
 # AES-128 ECB Encryptor
-This program is a minimal implementation of AES-128 encryption using ECB mode written for educational learning to see how AES works internally. It is not a production ready cryptographic tool. 
+This program is a minimal implementation of AES-128 encryption using ECB mode written for educational purposes to see how AES works internally. It is not a production ready cryptographic tool. 
 
 ## Usage
 The program reads everything from stdin and writes ciphertext to stdout: 
