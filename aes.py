@@ -1,5 +1,6 @@
 import sys
 
+# AES S-box with 256 entries, each entry is a byte (0-255)
 SBOX = [
     0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7, 0xab, 0x76,
     0xca, 0x82, 0xc9, 0x7d, 0xfa, 0x59, 0x47, 0xf0, 0xad, 0xd4, 0xa2, 0xaf, 0x9c, 0xa4, 0x72, 0xc0,
@@ -19,31 +20,72 @@ SBOX = [
     0x8c, 0xa1, 0x89, 0x0d, 0xbf, 0xe6, 0x42, 0x68, 0x41, 0x99, 0x2d, 0x0f, 0xb0, 0x54, 0xbb, 0x16
 ]
 
+# Round constants used in the key schedule
 RCON = [
     0x00, 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40,
     0x80, 0x1b, 0x36
 ]
 
 def sub_bytes(state):
+    """
+    Replaces every byte in the state with its corresponding value from the S-box
+
+    Input: 
+        state -- 4x4 matrix of bytes (list of lists)
+    """
     for i in range(4):
         for j in range(4):
             state[i][j] = SBOX[state[i][j]]
 
 def rot_word(word):
+    """
+    Cyclically rotates a 4-byte word one byte to the left
+
+    Input:
+        word -- 4-byte sequence (list of 4 bytes)
+    Output:
+        bytes -- new 4-byte sequence after rotation
+    """
     return word[1:] + word[:1]
 
 def sub_word(word):
+    """
+    Substitutes each byte in the word with its corresponding value from the S-box
+
+    Input:
+        word -- 4-byte sequence (list of 4 bytes)
+    Output:
+        bytes -- new 4-byte sequence after substitution with S-box
+    """
     return bytes(SBOX[a] for a in word)
 
 def xor_bytes(a, b):
+    """
+    XORs two byte sequences
+
+    Input:
+        a, b -- byte sequences of the same length
+    Output:
+        bytes -- result of a XOR b
+    """
     return bytes(x ^ y for x, y in zip(a, b))
 
 def expand_key(key):
+    """
+    Expands the secret key into a 11 round keys (1 initial + 10 round keys), each 16 bytes long
+
+    Input:
+        key -- 16-byte secret key
+    Output:
+        list[bytes] -- 11 round keys, each 16 bytes long
+    """
     w = [key[i*4:(i+1)*4] for i in range(4)]
 
+    # Expand the key to 44 words (4 bytes each)
     for i in range(4, 44):
         temp = w[i-1]
 
+        # Every 4th word gets a special transformation: rotate, substitute, and XOR with RCON
         if i % 4 == 0:
             temp = sub_word(rot_word(temp))
             rcon_byte = RCON[i // 4]
@@ -51,6 +93,7 @@ def expand_key(key):
 
         w.append(xor_bytes(w[i-4], temp))
 
+    # Group every 4 words into a round key (16 bytes)
     round_keys = []
     for i in range(11):
         rk = b''.join(w[i*4:(i+1)*4])
@@ -59,6 +102,14 @@ def expand_key(key):
     return round_keys
 
 def bytes_to_state(block):
+    """
+    Converts a 16-byte block into a 4x4 matrix of bytes
+
+    Input:
+        block -- 16-byte sequence
+    Output:
+        list[list[int]] -- 4x4 matrix of bytes (list of lists)
+    """
     state = [[0] * 4 for _ in range(4)]
     for r in range(4):
         for c in range(4):
@@ -66,6 +117,14 @@ def bytes_to_state(block):
     return state
 
 def state_to_bytes(state):
+    """
+    Flattens a 4x4 matrix back into a 16-byte block
+
+    Input:
+        state -- 4x4 matrix of bytes (list of lists)
+    Output:
+        bytes -- 16-byte block
+    """
     block = bytearray(16)
     for r in range(4):
         for c in range(4):
@@ -73,11 +132,24 @@ def state_to_bytes(state):
     return bytes(block)
 
 def add_round_key(state, round_key):
+    """
+    Adds the round key to the state
+
+    Input:
+        state -- 4x4 matrix of bytes (list of lists)
+        round_key -- 16-byte round key
+    """
     for r in range(4):
         for c in range(4):
             state[r][c] ^= round_key[c * 4 + r]
 
 def shift_rows(state):
+    """
+    Cyclically shifts each row of the state matrix to the left by its row index (row 0 unchanged, row 1 shifted by 1, row 2 by 2, row 3 by 3)
+
+    Input:
+        state -- 4x4 matrix of bytes (list of lists)
+    """
     state[1] = state[1][1:] + state[1][:1]
 
     state[2] = state[2][2:] + state[2][:2]
@@ -85,12 +157,36 @@ def shift_rows(state):
     state[3] = state[3][3:] + state[3][:3]
 
 def xtime(a):
+    """
+    Multiplies a byte by 2 in the finite field GF(2^8)
+
+    Input:
+        a -- byte value (0-255)
+    Output:
+        int -- a * x mod (x^8 + x^4 + x^3 + x + 1), which is the byte value after multiplication by 2
+    """
     return ((a << 1) ^ 0x1b) & 0xFF if (a & 0x80) else (a << 1) & 0xFF
 
 def mul3(a):
+    """
+    Multiplies a byte by 3 in the finite field GF(2^8)
+
+    Input:
+        a -- byte value (0-255)
+    Output:
+        int -- a * 3 in GF(2^8), which is the byte value after multiplication by 3
+    """
     return xtime(a) ^ a
 
 def gf_mul(a, b):
+    """
+    Multiplies two bytes in the finite field GF(2^8)
+
+    Input:
+        a, b -- byte values (0-255)
+    Output:
+        int -- byte value after multiplication in GF(2^8)
+    """
     p = 0
     for _ in range(8):
         if b & 1:
@@ -103,6 +199,12 @@ def gf_mul(a, b):
     return p
 
 def mix_columns(state):
+    """
+    Mixes the columns of the state matrix
+
+    Input:
+        state -- 4x4 matrix of bytes (list of lists)
+    """
     for c in range(4):
         new_col = [
             xtime(state[0][c]) ^ mul3(state[1][c]) ^ state[2][c] ^ state[3][c],
@@ -114,6 +216,20 @@ def mix_columns(state):
             state[r][c] = new_col[r]
 
 def aes_encrypt_block(pt_block, round_keys):
+    """
+    Encrypts a single block using AES-128
+
+    Runs the standard AES-128 round structure:
+    - Initial AddRoundKey
+    - 9 rounds of SubBytes, ShiftRows, MixColumns, AddRoundKey
+    - 1 final round of SubBytes, ShiftRows, AddRoundKey
+
+    Input:
+        pt_block -- 16-byte plaintext block
+        round_keys -- list of round keys
+    Output:
+        bytes -- 16-byte ciphertext block
+    """
     state = bytes_to_state(pt_block)
     add_round_key(state, round_keys[0])
 
@@ -123,6 +239,7 @@ def aes_encrypt_block(pt_block, round_keys):
         mix_columns(state)
         add_round_key(state, round_keys[round_num])
 
+    # Final round has no MixColumns
     sub_bytes(state)
     shift_rows(state)
     add_round_key(state, round_keys[10])
@@ -132,6 +249,14 @@ def aes_encrypt_block(pt_block, round_keys):
     return ct_block
 
 def aes_ecb_encrypt(key, in_stream, out_stream):
+    """
+    Encrypts a stream of data using AES in ECB mode
+
+    Input:
+        key -- 16-byte secret key
+        in_stream -- input stream of plaintext data
+        out_stream -- output stream for ciphertext data
+    """
     round_keys = expand_key(key)
 
     while True:
@@ -141,5 +266,6 @@ def aes_ecb_encrypt(key, in_stream, out_stream):
         ct_block = aes_encrypt_block(block, round_keys)
         out_stream.write(ct_block)
 
+# Reads the 16-byte key from the first 16 bytes of stdin, then encrypts the remaining bytes of stdin in AES-128 ECB mode and writes the ciphertext to stdout
 key = sys.stdin.buffer.read(16)
 aes_ecb_encrypt(key, sys.stdin.buffer, sys.stdout.buffer)
